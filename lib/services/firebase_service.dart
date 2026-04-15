@@ -1,49 +1,11 @@
+import 'dart:math';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 class FirebaseService {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
-  Future<Map<String, dynamic>?> verifyAccessCode(String code) async {
-    try {
-      print('Mencari di users untuk kode: $code');
-      QuerySnapshot querySnapshot = await _firestore
-          .collection('users')
-          .where('accessCode', isEqualTo: code)
-          .get();
-          
-      if (querySnapshot.docs.isNotEmpty) {
-        return querySnapshot.docs.first.data() as Map<String, dynamic>;
-      }
-      return null;
-    } catch (e) {
-      print('Terjadi error koneksi / verifikasi: $e');
-      return null;
-    }
-  }
-
-  Future<List<Map<String, dynamic>>> getPdfsByRole(String role) async {
-    try {
-      QuerySnapshot querySnapshot = await _firestore
-          .collection('pdfs')
-          .where('role', isEqualTo: role)
-          .get();
-      return querySnapshot.docs.map((doc) => doc.data() as Map<String, dynamic>).toList();
-    } catch (e) {
-      print('Error getPdfsByRole: $e');
-      return [];
-    }
-  }
-
-  Future<List<Map<String, dynamic>>> getAllPdfs() async {
-    try {
-      QuerySnapshot querySnapshot = await _firestore.collection('pdfs').get();
-      return querySnapshot.docs.map((doc) => doc.data() as Map<String, dynamic>).toList();
-    } catch (e) {
-      print('Error getAllPdfs: $e');
-      return [];
-    }
-  }
-
+  // --- MANAJEMEN USER ---
+  // Menampilkan user yang MENUNGGU verifikasi
   Stream<QuerySnapshot> getPendingUsers() {
     return _firestore
         .collection('users')
@@ -51,37 +13,116 @@ class FirebaseService {
         .snapshots();
   }
 
-  Future<bool> approveUser(String documentId) async {
+  // Menampilkan SEMUA user untuk daftar blacklist
+  Stream<QuerySnapshot> getAllUsersStream() {
+    return _firestore
+        .collection('users')
+        .orderBy('createdAt', descending: true)
+        .snapshots();
+  }
+
+  Future<bool> toggleBlacklist(String docId, bool status) async {
     try {
-      await _firestore.collection('users').doc(documentId).update({
-        'isApproved': true,
-        'status': 'approved',
+      await _firestore.collection('users').doc(docId).update({
+        'isBlacklisted': status,
       });
       return true;
     } catch (e) {
-      print('Error approveUser: $e');
       return false;
     }
   }
 
-  Future<bool> submitRegistration(
+  // --- MANAJEMEN PDF ---
+  Stream<QuerySnapshot> getAllPdfsStream() {
+    return _firestore
+        .collection('pdfs')
+        .orderBy('createdAt', descending: true)
+        .snapshots();
+  }
+
+  Future<bool> deletePdf(String docId) async {
+    try {
+      await _firestore.collection('pdfs').doc(docId).delete();
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  // --- FUNGSI AUTH & STATUS ---
+  Stream<DocumentSnapshot> streamUserStatus(String docId) {
+    return _firestore.collection('users').doc(docId).snapshots();
+  }
+
+  Future<Map<String, dynamic>?> verifyAccessCode(String code) async {
+    try {
+      QuerySnapshot querySnapshot = await _firestore
+          .collection('users')
+          .where('accessCode', isEqualTo: code)
+          .get();
+      if (querySnapshot.docs.isNotEmpty) {
+        return querySnapshot.docs.first.data() as Map<String, dynamic>;
+      }
+      return null;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  Future<List<Map<String, dynamic>>> getPdfsByRole(String role) async {
+    try {
+      QuerySnapshot q = await _firestore
+          .collection('pdfs')
+          .where('role', isEqualTo: role)
+          .get();
+      return q.docs.map((doc) => doc.data() as Map<String, dynamic>).toList();
+    } catch (e) {
+      return [];
+    }
+  }
+
+  Future<List<Map<String, dynamic>>> getAllPdfs() async {
+    try {
+      QuerySnapshot q = await _firestore.collection('pdfs').get();
+      return q.docs.map((doc) => doc.data() as Map<String, dynamic>).toList();
+    } catch (e) {
+      return [];
+    }
+  }
+
+  Future<String?> approveUser(String documentId) async {
+    try {
+      String newCode = "VTK-${Random().nextInt(9000) + 1000}";
+      await _firestore.collection('users').doc(documentId).update({
+        'isApproved': true,
+        'status': 'approved',
+        'accessCode': newCode,
+      });
+      return newCode;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  Future<String?> submitRegistration(
     String name,
     String phone,
     String role,
   ) async {
     try {
-      await _firestore.collection('users').add({
+      DocumentReference doc = await _firestore.collection('users').add({
         'name': name,
         'whatsapp': phone,
         'role': role,
         'isApproved': false,
+        'isBlacklisted': false,
         'status': 'pending',
         'createdAt': FieldValue.serverTimestamp(),
+        'accessCode': '',
       });
-      return true;
+      return doc.id;
     } catch (e) {
-      print('Terjadi error registrasi: $e');
-      return false;
+      return null;
     }
   }
 
@@ -95,7 +136,6 @@ class FirebaseService {
       });
       return true;
     } catch (e) {
-      print('Firebase addPdf error: $e');
       return false;
     }
   }

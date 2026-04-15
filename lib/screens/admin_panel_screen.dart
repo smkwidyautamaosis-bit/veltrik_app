@@ -5,6 +5,9 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../services/firebase_service.dart';
 import '../services/supabase_service.dart';
+import '../widgets/premium_scaffold.dart';
+import '../widgets/glass_card.dart';
+import '../widgets/glass_text_field.dart';
 
 class AdminPanelScreen extends StatefulWidget {
   const AdminPanelScreen({super.key});
@@ -14,181 +17,236 @@ class AdminPanelScreen extends StatefulWidget {
 }
 
 class _AdminPanelScreenState extends State<AdminPanelScreen> {
-  final FirebaseService _firebaseService = FirebaseService();
-  final SupabaseService _supabaseService = SupabaseService();
+  int _currentView = 0; // 0:Menu, 1:Verif, 2:Upload, 3:UserList, 4:PdfBank
+
+  final FirebaseService _fs = FirebaseService();
+  final SupabaseService _ss = SupabaseService();
+  final TextEditingController _titleController = TextEditingController();
   final Set<String> _loadingApprovals = {};
 
-  final TextEditingController _titleController = TextEditingController();
   String _selectedRole = 'Rol 10';
   bool _isUploading = false;
-  double _uploadProgress = 0.0;
 
-  Future<void> _approveUser(String docId) async {
-    setState(() {
-      _loadingApprovals.add(docId);
-    });
+  @override
+  Widget build(BuildContext context) {
+    String title = "ADMIN CENTER";
+    if (_currentView == 1) title = "VERIFIKASI";
+    if (_currentView == 2) title = "UPLOAD BARU";
+    if (_currentView == 3) title = "DAFTAR USER";
+    if (_currentView == 4) title = "BANK PDF";
 
-    final success = await _firebaseService.approveUser(docId);
-    
-    if (mounted) {
-      setState(() {
-         _loadingApprovals.remove(docId);
-      });
-      if (success) {
-         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('User berhasil diapprove!')));
-      } else {
-         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Gagal melakukan approve.')));
-      }
+    return PremiumScaffold(
+      title: title,
+      leading: _currentView != 0
+          ? IconButton(
+              icon: const Icon(Icons.arrow_back_ios_new),
+              onPressed: () => setState(() => _currentView = 0),
+            )
+          : null,
+      body: _buildBody(),
+    );
+  }
+
+  Widget _buildBody() {
+    switch (_currentView) {
+      case 1:
+        return _buildVerificationList();
+      case 2:
+        return _buildUploadForm();
+      case 3:
+        return _buildUserManagement();
+      case 4:
+        return _buildPdfBank();
+      default:
+        return _buildMainMenu();
     }
   }
 
-  Future<void> _launchWhatsApp(String name, String phone) async {
-    final msg = "Halo $name, saya admin Veltrik. Bisa kirimkan bukti pembayarannya?";
-    String formattedPhone = phone.trim();
-    if (formattedPhone.startsWith('0')) {
-      formattedPhone = '62${formattedPhone.substring(1)}';
-    }
-    
-    final Uri url = Uri.parse("https://wa.me/$formattedPhone?text=${Uri.encodeComponent(msg)}");
-    if (!await launchUrl(url, mode: LaunchMode.externalApplication)) {
-      if (mounted) {
-         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Gagal membuka WhatsApp')));
-      }
-    }
+  Widget _buildMainMenu() {
+    return GridView.count(
+      padding: const EdgeInsets.all(24),
+      crossAxisCount: 2,
+      crossAxisSpacing: 16,
+      mainAxisSpacing: 16,
+      children: [
+        _menu(Icons.how_to_reg_rounded, "Verifikasi", Colors.orangeAccent, 1),
+        _menu(Icons.people_alt_rounded, "User List", Colors.greenAccent, 3),
+        _menu(Icons.upload_file_rounded, "Upload", Colors.blueAccent, 2),
+        _menu(Icons.folder_special_rounded, "Bank PDF", Colors.purpleAccent, 4),
+      ],
+    );
   }
 
-  Future<void> _pickAndUploadPdf() async {
-    if (_titleController.text.trim().isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Judul materi harus diisi')));
-      return;
-    }
+  Widget _menu(IconData icon, String label, Color color, int view) {
+    return InkWell(
+      onTap: () => setState(() => _currentView = view),
+      borderRadius: BorderRadius.circular(24),
+      child: GlassCard(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(icon, color: color, size: 40),
+            const SizedBox(height: 12),
+            Text(
+              label,
+              style: const TextStyle(
+                fontWeight: FontWeight.bold,
+                color: Colors.white,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 
-    try {
-      fp.FilePickerResult? result = await fp.FilePicker.pickFiles(
-        type: fp.FileType.custom,
-        allowedExtensions: ['pdf'],
-      );
+  Widget _buildVerificationList() {
+    return StreamBuilder<QuerySnapshot>(
+      stream: _fs.getPendingUsers(),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting)
+          return const Center(child: CircularProgressIndicator());
+        final docs = snapshot.data?.docs ?? [];
+        if (docs.isEmpty)
+          return const Center(
+            child: Text(
+              "Antrean kosong.",
+              style: TextStyle(color: Colors.white54),
+            ),
+          );
 
-      if (result != null && result.files.single.path != null) {
-        File file = File(result.files.single.path!);
-        
-        int sizeInBytes = file.lengthSync();
-        if (sizeInBytes > 5 * 1024 * 1024) {
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Ukuran file maksimal 5MB')));
-          }
-          return;
-        }
+        return ListView.builder(
+          padding: const EdgeInsets.all(20),
+          itemCount: docs.length,
+          itemBuilder: (context, index) {
+            final data = docs[index].data() as Map<String, dynamic>;
+            final id = docs[index].id;
+            final isApproving = _loadingApprovals.contains(id);
 
-        setState(() {
-          _isUploading = true;
-          _uploadProgress = 0.1;
-        });
-
-        String titleStr = _titleController.text.trim();
-        String roleStr = _selectedRole;
-
-        String? publicUrl = await _supabaseService.uploadPdf(file, result.files.single.name);
-        
-        setState(() {
-          _uploadProgress = 0.8;
-        });
-
-        if (publicUrl != null) {
-          bool dbOk = await _firebaseService.addPdfRecord(titleStr, roleStr, publicUrl);
-          if (dbOk) {
-            setState(() {
-              _uploadProgress = 1.0;
-              _titleController.clear();
-              _selectedRole = 'Rol 10';
-            });
-            if (mounted) {
-              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('File PDF berhasil di-upload!')));
-            }
-          } else {
-             if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Gagal menyimpan record di database')));
-          }
-        } else {
-           if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Gagal upload ke server')));
-        }
-      }
-    } catch (e) {
-       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
-    } finally {
-      if (mounted) {
-        setState(() {
-          _isUploading = false;
-          _uploadProgress = 0.0;
-        });
-      }
-    }
+            return Padding(
+              padding: const EdgeInsets.only(bottom: 12),
+              child: GlassCard(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  children: [
+                    ListTile(
+                      title: Text(
+                        data['name'] ?? 'No Name',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      subtitle: Text(
+                        data['role'] ?? '-',
+                        style: const TextStyle(color: Colors.blueAccent),
+                      ),
+                    ),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: TextButton(
+                            onPressed: () =>
+                                _launchWhatsApp(data['name'], data['whatsapp']),
+                            child: const Text(
+                              "Chat WA",
+                              style: TextStyle(color: Colors.greenAccent),
+                            ),
+                          ),
+                        ),
+                        Expanded(
+                          child: ElevatedButton(
+                            onPressed: isApproving
+                                ? null
+                                : () => _handleApprove(
+                                    id,
+                                    data['name'],
+                                    data['whatsapp'],
+                                  ),
+                            child: const Text("Approve"),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
   }
 
   Widget _buildUploadForm() {
-    return Card(
-      color: const Color(0xFF1E1E1E),
-      margin: const EdgeInsets.all(16),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16), side: const BorderSide(color: Colors.blueAccent, width: 1)),
-      child: Padding(
-        padding: const EdgeInsets.all(16.0),
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(24),
+      child: GlassCard(
+        padding: const EdgeInsets.all(24),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            const Text('Tambah Materi Baru', style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
-            const SizedBox(height: 16),
-            TextField(
-              controller: _titleController,
-              style: const TextStyle(color: Colors.white),
-              decoration: InputDecoration(
-                hintText: 'Judul Materi',
-                hintStyle: const TextStyle(color: Colors.white38),
-                filled: true,
-                fillColor: const Color(0xFF121212),
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
+            const Text(
+              "Informasi Materi",
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
               ),
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 24),
+            GlassTextField(
+              controller: _titleController,
+              hintText: "Judul Materi (PDF)",
+              prefixIcon: Icons.title_rounded,
+            ),
+            const SizedBox(height: 20),
+            const Text(
+              "Target Role:",
+              style: TextStyle(color: Colors.white70, fontSize: 14),
+            ),
+            const SizedBox(height: 8),
             DropdownButtonFormField<String>(
               value: _selectedRole,
-              dropdownColor: const Color(0xFF1E1E1E),
+              dropdownColor: const Color(0xFF0D0F22),
               style: const TextStyle(color: Colors.white),
               decoration: InputDecoration(
                 filled: true,
-                fillColor: const Color(0xFF121212),
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
+                fillColor: Colors.white.withValues(alpha: 0.05),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide.none,
+                ),
               ),
-              items: ['Rol 10', 'Rol 11', 'Rol 12'].map((String value) {
-                return DropdownMenuItem<String>(
-                  value: value,
-                  child: Text(value),
-                );
-              }).toList(),
-              onChanged: (newValue) {
-                if (newValue != null) {
-                  setState(() {
-                    _selectedRole = newValue;
-                  });
-                }
-              },
+              items: ['Rol 10', 'Rol 11', 'Rol 12']
+                  .map((String v) => DropdownMenuItem(value: v, child: Text(v)))
+                  .toList(),
+              onChanged: (v) => setState(() => _selectedRole = v!),
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: 40),
             if (_isUploading)
-              Column(
-                children: [
-                  LinearProgressIndicator(value: _uploadProgress, color: Colors.blueAccent),
-                  const SizedBox(height: 8),
-                  Text('Mengupload... ${(_uploadProgress * 100).toInt()}%', style: const TextStyle(color: Colors.white70)),
-                ]
+              const Center(
+                child: CircularProgressIndicator(color: Colors.blueAccent),
               )
             else
               ElevatedButton.icon(
-                icon: const Icon(Icons.upload_file),
-                label: const Text('Pilih & Upload PDF'),
+                icon: const Icon(
+                  Icons.cloud_upload_rounded,
+                  color: Colors.white,
+                ),
+                label: const Text(
+                  "Pilih & Simpan PDF",
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: Colors.blueAccent,
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(vertical: 14),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  padding: const EdgeInsets.all(18),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
                 ),
                 onPressed: _pickAndUploadPdf,
               ),
@@ -198,149 +256,173 @@ class _AdminPanelScreenState extends State<AdminPanelScreen> {
     );
   }
 
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Admin Panel'),
-        backgroundColor: Colors.redAccent.withValues(alpha: 0.2),
-      ),
-      body: Column(
-        children: [
-          _buildUploadForm(),
-          Expanded(
-            child: StreamBuilder<QuerySnapshot>(
-              stream: _firebaseService.getPendingUsers(),
-              builder: (context, snapshot) {
-                if (snapshot.connectionState == ConnectionState.waiting) {
-                   return const Center(child: CircularProgressIndicator(color: Colors.redAccent));
-                }
-                if (snapshot.hasError) {
-                   return const Center(child: Text('Terjadi kesalahan memuat data', style: TextStyle(color: Colors.white)));
-                }
-                
-                final docs = snapshot.data?.docs ?? [];
-                
-                if (docs.isEmpty) {
-                   return Center(
-                     child: Column(
-                       mainAxisAlignment: MainAxisAlignment.center,
-                       children: [
-                         Icon(Icons.check_circle_outline, size: 80, color: Colors.green.withValues(alpha: 0.6)),
-                         const SizedBox(height: 16),
-                         const Text(
-                           'Semua aman, Bos!\nTidak ada antrean verifikasi.',
-                           textAlign: TextAlign.center,
-                           style: TextStyle(color: Colors.white70, fontSize: 18),
-                         ),
-                       ],
-                     ),
-                   );
-                }
+  Widget _buildUserManagement() {
+    return StreamBuilder<QuerySnapshot>(
+      stream: _fs.getAllUsersStream(),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting)
+          return const Center(child: CircularProgressIndicator());
+        final docs = snapshot.data?.docs ?? [];
+        return ListView.builder(
+          padding: const EdgeInsets.all(20),
+          itemCount: docs.length,
+          itemBuilder: (context, index) {
+            var user = docs[index].data() as Map<String, dynamic>;
+            bool isBlack = user['isBlacklisted'] ?? false;
+            return Padding(
+              padding: const EdgeInsets.only(bottom: 10),
+              child: GlassCard(
+                padding: const EdgeInsets.all(12),
+                child: ListTile(
+                  title: Text(
+                    user['name'] ?? '',
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  subtitle: Text(
+                    "${user['role']} | ${user['whatsapp']}",
+                    style: const TextStyle(color: Colors.white54, fontSize: 12),
+                  ),
+                  trailing: IconButton(
+                    icon: Icon(
+                      isBlack
+                          ? Icons.block_rounded
+                          : Icons.check_circle_outline_rounded,
+                      color: isBlack ? Colors.redAccent : Colors.greenAccent,
+                    ),
+                    onPressed: () =>
+                        _fs.toggleBlacklist(docs[index].id, !isBlack),
+                  ),
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
 
-                return ListView.builder(
-                  padding: const EdgeInsets.all(16),
-                  itemCount: docs.length,
-                  itemBuilder: (context, index) {
-                    final doc = docs[index];
-                    final data = doc.data() as Map<String, dynamic>;
-                    
-                    final name = data['name'] ?? 'No Name';
-                    final role = data['role'] ?? 'Unknown';
-                    final whatsapp = data['whatsapp'] ?? '-';
-                    
-                    Timestamp? ts = data['createdAt'] as Timestamp?;
-                    String timeStr = ts != null ? _formatTimestamp(ts.toDate()) : 'Waktu tidak tersedia';
-                    
-                    final isApproving = _loadingApprovals.contains(doc.id);
+  Widget _buildPdfBank() {
+    return StreamBuilder<QuerySnapshot>(
+      stream: _fs.getAllPdfsStream(),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting)
+          return const Center(child: CircularProgressIndicator());
+        final docs = snapshot.data?.docs ?? [];
+        return ListView.builder(
+          padding: const EdgeInsets.all(20),
+          itemCount: docs.length,
+          itemBuilder: (context, index) {
+            var pdf = docs[index].data() as Map<String, dynamic>;
+            return Padding(
+              padding: const EdgeInsets.only(bottom: 10),
+              child: GlassCard(
+                padding: const EdgeInsets.all(8),
+                child: ListTile(
+                  leading: const Icon(
+                    Icons.picture_as_pdf_rounded,
+                    color: Colors.redAccent,
+                  ),
+                  title: Text(
+                    pdf['title'] ?? '',
+                    style: const TextStyle(color: Colors.white),
+                  ),
+                  subtitle: Text(
+                    pdf['role'] ?? '',
+                    style: const TextStyle(
+                      color: Colors.blueAccent,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  trailing: IconButton(
+                    icon: const Icon(
+                      Icons.delete_sweep_rounded,
+                      color: Colors.white24,
+                    ),
+                    onPressed: () => _fs.deletePdf(docs[index].id),
+                  ),
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
 
-                    return Card(
-                      color: const Color(0xFF1E1E1E),
-                      margin: const EdgeInsets.only(bottom: 16),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16), side: const BorderSide(color: Colors.white12)),
-                      child: Padding(
-                        padding: const EdgeInsets.all(16.0),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                              children: [
-                                Expanded(
-                                  child: Text(name, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white)),
-                                ),
-                                Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                                  decoration: BoxDecoration(
-                                    color: Colors.redAccent.withValues(alpha: 0.2),
-                                    borderRadius: BorderRadius.circular(12),
-                                    border: Border.all(color: Colors.redAccent.withValues(alpha: 0.5))
-                                  ),
-                                  child: Text(role, style: const TextStyle(color: Colors.redAccent, fontSize: 12, fontWeight: FontWeight.bold)),
-                                )
-                              ],
-                            ),
-                            const SizedBox(height: 8),
-                            Row(
-                              children: [
-                                const Icon(Icons.phone_android, size: 16, color: Colors.white54),
-                                const SizedBox(width: 8),
-                                Text(whatsapp, style: const TextStyle(color: Colors.white70)),
-                              ],
-                            ),
-                            const SizedBox(height: 4),
-                            Row(
-                              children: [
-                                const Icon(Icons.access_time, size: 16, color: Colors.white54),
-                                const SizedBox(width: 8),
-                                Text(timeStr, style: const TextStyle(color: Colors.white54, fontSize: 12)),
-                              ],
-                            ),
-                            const SizedBox(height: 16),
-                            Row(
-                              children: [
-                                Expanded(
-                                  child: ElevatedButton.icon(
-                                    icon: const Icon(Icons.chat, size: 18),
-                                    label: const Text('Chat WA'),
-                                    style: ElevatedButton.styleFrom(
-                                      backgroundColor: Colors.blueAccent,
-                                      foregroundColor: Colors.white,
-                                    ),
-                                    onPressed: () => _launchWhatsApp(name, whatsapp),
-                                  ),
-                                ),
-                                const SizedBox(width: 12),
-                                Expanded(
-                                  child: ElevatedButton.icon(
-                                    icon: isApproving 
-                                      ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2)) 
-                                      : const Icon(Icons.check, size: 18),
-                                    label: Text(isApproving ? 'Proses...' : 'Approve'),
-                                    style: ElevatedButton.styleFrom(
-                                      backgroundColor: Colors.green,
-                                      foregroundColor: Colors.white,
-                                    ),
-                                    onPressed: isApproving ? null : () => _approveUser(doc.id),
-                                  ),
-                                ),
-                              ],
-                            )
-                          ],
-                        ),
-                      ),
-                    );
-                  },
-                );
-              },
-            ),
+  Future<void> _handleApprove(String docId, String name, String phone) async {
+    setState(() => _loadingApprovals.add(docId));
+    final code = await _fs.approveUser(docId);
+    setState(() => _loadingApprovals.remove(docId));
+    if (code != null && mounted) _showSuccessDialog(name, phone, code);
+  }
+
+  void _showSuccessDialog(String name, String phone, String code) {
+    showDialog(
+      context: context,
+      builder: (c) => AlertDialog(
+        backgroundColor: const Color(0xFF0D0F22),
+        title: const Text('Approved!', style: TextStyle(color: Colors.white)),
+        content: Text(
+          'Kode Akses $name: $code',
+          style: const TextStyle(color: Colors.white70),
+        ),
+        actions: [
+          ElevatedButton(
+            onPressed: () {
+              Navigator.pop(c);
+              _launchWhatsApp(name, phone, code: code);
+            },
+            child: const Text("Kirim WA"),
           ),
         ],
       ),
     );
   }
 
-  String _formatTimestamp(DateTime dt) {
-     return "${dt.day.toString().padLeft(2, '0')}/${dt.month.toString().padLeft(2, '0')}/${dt.year} ${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}";
+  Future<void> _pickAndUploadPdf() async {
+    if (_titleController.text.isEmpty) return;
+    fp.FilePickerResult? res = await fp.FilePicker.pickFiles(
+      type: fp.FileType.custom,
+      allowedExtensions: ['pdf'],
+    );
+    if (res != null) {
+      setState(() => _isUploading = true);
+      String? url = await _ss.uploadPdf(
+        File(res.files.single.path!),
+        res.files.single.name,
+      );
+      if (url != null) {
+        await _fs.addPdfRecord(_titleController.text, _selectedRole, url);
+        if (mounted)
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              backgroundColor: Colors.green,
+              content: Text('Materi Berhasil Diupload!'),
+            ),
+          );
+        _titleController.clear();
+      }
+      setState(() => _isUploading = false);
+    }
+  }
+
+  Future<void> _launchWhatsApp(
+    String name,
+    String phone, {
+    String? code,
+  }) async {
+    String formattedPhone = phone.startsWith('0')
+        ? '62${phone.substring(1)}'
+        : phone;
+    String message = code != null
+        ? "Halo $name, Kode Akses Veltrik Anda: *$code*"
+        : "Halo $name, ada yang bisa Admin bantu?";
+    final Uri url = Uri.parse(
+      "https://wa.me/$formattedPhone?text=${Uri.encodeComponent(message)}",
+    );
+    await launchUrl(url, mode: LaunchMode.externalApplication);
   }
 }

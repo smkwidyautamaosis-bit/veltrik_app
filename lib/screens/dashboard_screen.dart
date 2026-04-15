@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import '../services/firebase_service.dart';
-import 'pdf_viewer_screen.dart';
+import '../widgets/premium_scaffold.dart';
+import '../widgets/glass_card.dart';
 import 'admin_panel_screen.dart';
+import 'pdf_viewer_screen.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
@@ -12,294 +15,247 @@ class DashboardScreen extends StatefulWidget {
 }
 
 class _DashboardScreenState extends State<DashboardScreen> {
-  final FirebaseService _firebaseService = FirebaseService();
-  late Future<List<Map<String, dynamic>>> _pdfsFuture;
-  
-  bool _isLoading = true;
-  bool _isGuest = true;
-  String _name = 'Guest';
+  final FirebaseService _fs = FirebaseService();
+  Future<List<Map<String, dynamic>>>? _pdfsFuture;
+
+  String? _accessCode;
+  String? _pendingId;
+  String _name = 'User';
   String _role = 'Guest';
+  bool _isLoading = true;
 
   @override
   void initState() {
     super.initState();
-    _resolveLoginState();
+    _init();
   }
 
-  Future<void> _resolveLoginState() async {
-    SharedPreferences prefs = await SharedPreferences.getInstance();
-    String? accessCode = prefs.getString('accessCode');
+  Future<void> _init() async {
+    SharedPreferences p = await SharedPreferences.getInstance();
 
-    if (accessCode != null && accessCode.isNotEmpty) {
-      final userData = await _firebaseService.verifyAccessCode(accessCode);
-      if (userData != null && (userData['isApproved'] ?? false)) {
-        if (mounted) {
-          setState(() {
-            _name = userData['name'] ?? 'User';
-            _role = userData['role'] ?? 'Unknown';
-            _isGuest = false;
-            _pdfsFuture = _firebaseService.getPdfsByRole(_role);
-            _isLoading = false;
-          });
+    // Ambil data session dari memori HP
+    _accessCode = p.getString('accessCode');
+    _pendingId = p.getString('pendingDocId');
+
+    if (_accessCode != null) {
+      final u = await _fs.verifyAccessCode(_accessCode!);
+
+      if (u != null) {
+        // --- PROTEKSI BLACKLIST ---
+        if (u['isBlacklisted'] == true) {
+          await p.clear(); // Hapus session di HP
+          if (mounted) {
+            _showBlacklistDialog();
+            Navigator.pushReplacementNamed(context, '/welcome');
+          }
+          return;
         }
-        return;
+
+        setState(() {
+          _name = u['name'] ?? 'User';
+          _role = u['role'] ?? 'Unknown';
+          // Load PDF hanya untuk siswa (bukan Admin)
+          if (_role.toLowerCase() != 'admin') {
+            _pdfsFuture = _fs.getPdfsByRole(_role);
+          }
+        });
       }
     }
-    
-    // Fallback to Guest
-    if (mounted) {
-      setState(() {
-        _isGuest = true;
-        _name = 'Tamu';
-        _role = 'Guest Catalog';
-        _pdfsFuture = _firebaseService.getAllPdfs();
-        _isLoading = false;
-      });
-    }
+
+    setState(() => _isLoading = false);
   }
 
-  void _showPaywallModal(BuildContext context) {
-    showModalBottomSheet(
+  void _showBlacklistDialog() {
+    showDialog(
       context: context,
-      backgroundColor: const Color(0xFF1E1E1E),
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.only(topLeft: Radius.circular(24), topRight: Radius.circular(24)),
-      ),
-      builder: (ctx) {
-        return Padding(
-          padding: const EdgeInsets.all(24.0),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                width: 40,
-                height: 4,
-                margin: const EdgeInsets.only(bottom: 24),
-                decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(2)),
-              ),
-              const Icon(Icons.lock_outline, size: 64, color: Colors.blueAccent),
-              const SizedBox(height: 16),
-              const Text(
-                'Materi Eksklusif',
-                style: TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.bold),
-              ),
-              const SizedBox(height: 8),
-              const Text(
-                'Silakan masuk dengan kode akses Anda untuk membuka kunci materi PDF ini.',
-                textAlign: TextAlign.center,
-                style: TextStyle(color: Colors.white70, fontSize: 14),
-              ),
-              const SizedBox(height: 24),
-              SizedBox(
-                width: double.infinity,
-                child: ElevatedButton(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.blueAccent,
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(vertical: 14),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                  ),
-                  onPressed: () {
-                    Navigator.pop(ctx);
-                    Navigator.pushNamed(context, '/login');
-                  },
-                  child: const Text('Sudah Punya Kode', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-                ),
-              ),
-              const SizedBox(height: 12),
-              SizedBox(
-                width: double.infinity,
-                child: OutlinedButton(
-                  style: OutlinedButton.styleFrom(
-                    side: const BorderSide(color: Colors.blueAccent),
-                    foregroundColor: Colors.blueAccent,
-                    padding: const EdgeInsets.symmetric(vertical: 14),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                  ),
-                  onPressed: () {
-                    Navigator.pop(ctx);
-                    Navigator.pushNamed(context, '/role_selection');
-                  },
-                  child: const Text('Belum Punya Akses', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-                ),
-              ),
-              const SizedBox(height: 32),
-            ],
+      builder: (context) => AlertDialog(
+        backgroundColor: const Color(0xFF0D0F22),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+        title: const Text(
+          "Akses Ditolak",
+          style: TextStyle(
+            color: Colors.redAccent,
+            fontWeight: FontWeight.bold,
           ),
-        );
-      }
+        ),
+        content: const Text(
+          "Akun Anda telah dinonaktifkan oleh Admin karena melanggar peraturan Veltrik.",
+          style: TextStyle(color: Colors.white70),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text("OK", style: TextStyle(color: Colors.blueAccent)),
+          ),
+        ],
+      ),
     );
   }
 
   @override
   Widget build(BuildContext context) {
-    if (_isLoading) {
-      return const Scaffold(
-        body: Center(child: CircularProgressIndicator(color: Colors.blueAccent)),
+    if (_isLoading)
+      return const PremiumScaffold(
+        body: Center(
+          child: CircularProgressIndicator(color: Colors.blueAccent),
+        ),
       );
+
+    // 1. JIKA ADMIN -> LANGSUNG KE ADMIN CENTER
+    if (_role.toLowerCase() == 'admin') {
+      return const AdminPanelScreen();
     }
 
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Veltrik Dashboard', style: TextStyle(fontWeight: FontWeight.bold)),
-        actions: [
-          if (!_isGuest && _role.toLowerCase() == 'admin')
-            IconButton(
-              icon: const Icon(Icons.settings),
-              tooltip: 'Admin Panel',
-              onPressed: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (context) => const AdminPanelScreen()),
-                );
-              },
-            ),
-          if (!_isGuest)
-            IconButton(
-               icon: const Icon(Icons.exit_to_app),
-               tooltip: 'Keluar',
-               onPressed: () async {
-                  SharedPreferences prefs = await SharedPreferences.getInstance();
-                  await prefs.remove('accessCode');
-                  if (!context.mounted) return;
-                  Navigator.pushReplacementNamed(context, '/welcome');
-               },
-            )
-        ],
-      ),
+    // 2. JIKA USER AKTIF -> KE PERPUSTAKAAN PDF
+    if (_accessCode != null) return _buildLibrary();
+
+    // 3. JIKA BARU DAFTAR -> KE STATUS VERIFIKASI
+    if (_pendingId != null) return _buildPendingStatus();
+
+    // 4. JIKA TAMU -> KE GUEST MODE
+    return _buildGuestView();
+  }
+
+  // ==========================================
+  // VIEW: PERPUSTAKAAN SISWA (ROL 10/11/12)
+  // ==========================================
+  Widget _buildLibrary() {
+    return PremiumScaffold(
+      title: 'VELTRIK HUB',
+      actions: [
+        IconButton(
+          icon: const Icon(Icons.logout_rounded, color: Colors.white70),
+          onPressed: _logout,
+        ),
+      ],
       body: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          _isGuest ? _buildGuestBanner() : _buildWelcomeHeader(),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 16.0),
+          _buildUserHeader(),
+          const Padding(
+            padding: EdgeInsets.symmetric(horizontal: 24.0, vertical: 16.0),
             child: Text(
-              _isGuest ? 'Katalog Materi Veltrik' : 'Dokumen Anda',
-              style: const TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold),
+              'Materi Belajar Anda',
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+              ),
             ),
           ),
-          Expanded(
-            child: _buildPdfList(),
-          ),
+          Expanded(child: _buildPdfGrid()),
         ],
       ),
     );
   }
 
-  Widget _buildWelcomeHeader() {
-    return Container(
+  Widget _buildUserHeader() {
+    return Padding(
       padding: const EdgeInsets.all(24.0),
-      decoration: const BoxDecoration(
-        color: Color(0xFF1E1E1E),
-        borderRadius: BorderRadius.only(bottomLeft: Radius.circular(32), bottomRight: Radius.circular(32)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text('Halo, $_name!', style: const TextStyle(color: Colors.white, fontSize: 28, fontWeight: FontWeight.bold)),
-          const SizedBox(height: 8),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-            decoration: BoxDecoration(
-              color: Colors.blueAccent.withValues(alpha: 0.2),
-              borderRadius: BorderRadius.circular(20),
-              border: Border.all(color: Colors.blueAccent.withValues(alpha: 0.5)),
+      child: GlassCard(
+        child: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: Colors.blueAccent.withOpacity(0.1),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(
+                Icons.person_rounded,
+                color: Colors.blueAccent,
+                size: 30,
+              ),
             ),
-            child: Text(_role, style: const TextStyle(color: Colors.blueAccent, fontWeight: FontWeight.bold)),
-          ),
-        ],
+            const SizedBox(width: 16),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Halo, $_name',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 20,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                Text(
+                  'Siswa $_role',
+                  style: TextStyle(
+                    color: Colors.blueAccent.withOpacity(0.7),
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
       ),
     );
   }
 
-  Widget _buildGuestBanner() {
-    return Container(
-      padding: const EdgeInsets.all(24.0),
-      decoration: const BoxDecoration(
-        color: Color(0xFF1c1b33), // Deep blue/Indigo 
-        borderRadius: BorderRadius.only(bottomLeft: Radius.circular(32), bottomRight: Radius.circular(32)),
-        border: Border(bottom: BorderSide(color: Colors.indigoAccent, width: 2)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Row(
-            children: [
-              Icon(Icons.explore, color: Colors.indigoAccent, size: 28),
-              SizedBox(width: 8),
-              Text('Selamat Datang.', style: TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold)),
-            ],
-          ),
-          const SizedBox(height: 12),
-          const Text(
-            'Eksplorasi etalase materi kami. Untuk membuka dokumen, Anda memerlukan kode akses eksklusif.',
-            style: TextStyle(color: Colors.white70, fontSize: 14),
-          ),
-          const SizedBox(height: 16),
-          Row(
-            children: [
-              Expanded(
-                child: ElevatedButton(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.indigoAccent,
-                    foregroundColor: Colors.white,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                  ),
-                  onPressed: () => Navigator.pushNamed(context, '/login'),
-                  child: const Text('Masuk', style: TextStyle(fontWeight: FontWeight.bold)),
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: OutlinedButton(
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: Colors.indigoAccent,
-                    side: const BorderSide(color: Colors.indigoAccent),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                  ),
-                  onPressed: () => Navigator.pushNamed(context, '/role_selection'),
-                  child: const Text('Minta Akses', style: TextStyle(fontWeight: FontWeight.bold)),
-                ),
-              ),
-            ],
-          )
-        ],
-      ),
-    );
-  }
-
-  Widget _buildPdfList() {
+  Widget _buildPdfGrid() {
     return FutureBuilder<List<Map<String, dynamic>>>(
       future: _pdfsFuture,
       builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting) {
+        if (snapshot.connectionState == ConnectionState.waiting)
           return const Center(child: CircularProgressIndicator());
-        } else if (snapshot.hasError) {
-          return const Center(child: Text('Terjadi kesalahan memuat data', style: TextStyle(color: Colors.redAccent)));
-        } else if (!snapshot.hasData || snapshot.data!.isEmpty) {
-          return Center(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(Icons.folder_off, size: 64, color: Colors.white.withValues(alpha: 0.2)),
-                const SizedBox(height: 16),
-                const Text('Tidak ada dokumen PDF tersedia saat ini.', style: TextStyle(color: Colors.white54)),
-              ],
+        final pdfs = snapshot.data ?? [];
+
+        if (pdfs.isEmpty) {
+          return const Center(
+            child: Text(
+              "Belum ada materi untuk kelas Anda.",
+              style: TextStyle(color: Colors.white54),
             ),
           );
         }
 
-        final pdfs = snapshot.data!;
         return ListView.separated(
-          padding: const EdgeInsets.all(24.0),
+          padding: const EdgeInsets.symmetric(horizontal: 24),
           itemCount: pdfs.length,
-          separatorBuilder: (context, index) => const SizedBox(height: 16),
+          separatorBuilder: (context, index) => const SizedBox(height: 12),
           itemBuilder: (context, index) {
             final pdf = pdfs[index];
-            return _buildPdfCard(
-              title: pdf['title'] ?? 'Dokumen Tanpa Judul',
-              url: pdf['url'] ?? '',
-              roleTag: pdf['role'] ?? '',
+            return InkWell(
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => PdfViewerScreen(
+                      title: pdf['title'] ?? 'PDF',
+                      url: pdf['url'] ?? '',
+                    ),
+                  ),
+                );
+              },
+              child: GlassCard(
+                padding: const EdgeInsets.all(16),
+                child: Row(
+                  children: [
+                    const Icon(
+                      Icons.picture_as_pdf_rounded,
+                      color: Colors.redAccent,
+                    ),
+                    const SizedBox(width: 16),
+                    Expanded(
+                      child: Text(
+                        pdf['title'] ?? 'Materi Tanpa Judul',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                    const Icon(
+                      Icons.arrow_forward_ios_rounded,
+                      color: Colors.white24,
+                      size: 14,
+                    ),
+                  ],
+                ),
+              ),
             );
           },
         );
@@ -307,53 +263,174 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
-  Widget _buildPdfCard({required String title, required String url, required String roleTag}) {
-    return InkWell(
-      onTap: () {
-        if (_isGuest) {
-          _showPaywallModal(context);
-        } else if (url.isNotEmpty) {
-          Navigator.push(
-            context,
-            MaterialPageRoute(builder: (context) => PdfViewerScreen(title: title, url: url)),
-          );
-        }
-      },
-      borderRadius: BorderRadius.circular(16),
-      child: Container(
-        padding: const EdgeInsets.all(20),
-        decoration: BoxDecoration(
-          color: const Color(0xFF1E1E1E),
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: Colors.white12),
-        ),
-        child: Row(
-          children: [
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: _isGuest ? Colors.grey.withValues(alpha: 0.1) : Colors.blueAccent.withValues(alpha: 0.1),
-                shape: BoxShape.circle,
-              ),
-              child: Icon(_isGuest ? Icons.lock : Icons.picture_as_pdf, color: _isGuest ? Colors.grey : Colors.blueAccent),
-            ),
-            const SizedBox(width: 16),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(title, style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w600)),
-                  if (_isGuest && roleTag.isNotEmpty) ...[
-                    const SizedBox(height: 4),
-                    Text('Eksklusif $roleTag', style: const TextStyle(color: Colors.indigoAccent, fontSize: 12, fontWeight: FontWeight.w500)),
-                  ],
+  // ==========================================
+  // VIEW: STATUS TUNGGU (AUTO-MAGIC UPDATE)
+  // ==========================================
+  Widget _buildPendingStatus() {
+    return PremiumScaffold(
+      title: 'STATUS VERIFIKASI',
+      body: StreamBuilder<DocumentSnapshot>(
+        stream: _fs.streamUserStatus(_pendingId!),
+        builder: (context, snapshot) {
+          if (!snapshot.hasData)
+            return const Center(child: CircularProgressIndicator());
+
+          var data = snapshot.data!.data() as Map<String, dynamic>;
+          bool approved = data['isApproved'] ?? false;
+          String code = data['accessCode'] ?? '';
+
+          return Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                GlassCard(
+                  child: Column(
+                    children: [
+                      Icon(
+                        approved
+                            ? Icons.verified_user_rounded
+                            : Icons.hourglass_empty,
+                        size: 80,
+                        color: approved
+                            ? Colors.greenAccent
+                            : Colors.orangeAccent,
+                      ),
+                      const SizedBox(height: 20),
+                      Text(
+                        approved ? 'Akses Terbuka!' : 'Sedang Diverifikasi',
+                        style: const TextStyle(
+                          fontSize: 24,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.white,
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      Text(
+                        approved
+                            ? 'Salin kode akses di bawah ini untuk login.'
+                            : 'Admin sedang mengecek pembayaran Anda.',
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(color: Colors.white54),
+                      ),
+                    ],
+                  ),
+                ),
+                if (approved) ...[
+                  const SizedBox(height: 32),
+                  const Text(
+                    "KODE AKSES ANDA:",
+                    style: TextStyle(
+                      color: Colors.blueAccent,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 12,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  GlassCard(
+                    padding: const EdgeInsets.symmetric(
+                      vertical: 16,
+                      horizontal: 32,
+                    ),
+                    child: SelectableText(
+                      code,
+                      style: const TextStyle(
+                        fontSize: 36,
+                        fontWeight: FontWeight.bold,
+                        letterSpacing: 6,
+                        color: Colors.white,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 32),
+                  ElevatedButton(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.blueAccent,
+                      minimumSize: const Size(double.infinity, 55),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                    ),
+                    onPressed: () =>
+                        Navigator.pushReplacementNamed(context, '/login'),
+                    child: const Text(
+                      'Ke Halaman Login',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
                 ],
-              ),
+                const SizedBox(height: 40),
+                TextButton(
+                  onPressed: _logout,
+                  child: const Text(
+                    'Batalkan & Keluar',
+                    style: TextStyle(color: Colors.white24),
+                  ),
+                ),
+              ],
             ),
-            Icon(_isGuest ? Icons.keyboard_arrow_right : Icons.download_rounded, color: Colors.white38),
-          ],
+          );
+        },
+      ),
+    );
+  }
+
+  // ==========================================
+  // VIEW: GUEST MODE
+  // ==========================================
+  Widget _buildGuestView() {
+    return PremiumScaffold(
+      title: 'VELTRIK GUEST',
+      body: Center(
+        child: Padding(
+          padding: const EdgeInsets.all(32.0),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const Icon(
+                Icons.lock_person_rounded,
+                size: 100,
+                color: Colors.white10,
+              ),
+              const SizedBox(height: 24),
+              const Text(
+                "Akses Terbatas",
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 24,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const SizedBox(height: 12),
+              const Text(
+                "Silakan masuk menggunakan kode akses atau lakukan pendaftaran materi baru.",
+                textAlign: TextAlign.center,
+                style: TextStyle(color: Colors.white54),
+              ),
+              const SizedBox(height: 40),
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.blueAccent,
+                  minimumSize: const Size(200, 50),
+                ),
+                onPressed: () =>
+                    Navigator.pushReplacementNamed(context, '/welcome'),
+                child: const Text("Kembali ke Awal"),
+              ),
+            ],
+          ),
         ),
       ),
     );
+  }
+
+  void _logout() async {
+    SharedPreferences p = await SharedPreferences.getInstance();
+    await p.clear();
+    if (mounted) Navigator.pushReplacementNamed(context, '/welcome');
   }
 }
