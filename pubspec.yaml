@@ -20,6 +20,7 @@ dependencies:
   shared_preferences: ^2.2.3
   supabase_flutter: ^2.12.2
   file_picker: ^11.0.2
+  screen_protector: ^1.5.1
 
 dev_dependencies:
   flutter_test:

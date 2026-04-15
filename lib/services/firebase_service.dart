@@ -139,4 +139,31 @@ class FirebaseService {
       return false;
     }
   }
+
+  Future<String?> submitRegistrationWithSecurity(
+    String name,
+    String phone,
+    String role,
+    int uniqueCode,
+    String referenceId,
+  ) async {
+    try {
+      DocumentReference doc = await _firestore.collection('users').add({
+        'name': name,
+        'whatsapp': phone,
+        'role': role,
+        'isApproved': false,
+        'isBlacklisted': false,
+        'status': 'pending',
+        'createdAt': FieldValue.serverTimestamp(),
+        'accessCode': '',
+        'uniqueCode': uniqueCode,
+        'referenceId': referenceId,
+        'nominal': 50000 + uniqueCode,
+      });
+      return doc.id;
+    } catch (e) {
+      return null;
+    }
+  }
 }

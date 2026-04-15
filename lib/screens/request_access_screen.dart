@@ -4,8 +4,6 @@ import '../services/firebase_service.dart';
 import '../widgets/premium_scaffold.dart';
 import '../widgets/glass_card.dart';
 import '../widgets/glass_text_field.dart';
-import 'dashboard_screen.dart';
-import 'verification_status_screen.dart';
 
 class RequestAccessScreen extends StatefulWidget {
   const RequestAccessScreen({super.key});
@@ -18,53 +16,51 @@ class _RequestAccessScreenState extends State<RequestAccessScreen> {
   final TextEditingController _codeController = TextEditingController();
   final FirebaseService _firebaseService = FirebaseService();
   bool _isLoading = false;
-  String _errorMessage = '';
 
   Future<void> _verifyCode() async {
-    setState(() {
-      _isLoading = true;
-      _errorMessage = '';
-    });
-
     final code = _codeController.text.trim();
     if (code.isEmpty) {
-      setState(() {
-        _errorMessage = 'Silakan masukkan Access Code Anda';
-        _isLoading = false;
-      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Silakan masukkan Kode Akses Anda')),
+      );
       return;
     }
 
-    final userData = await _firebaseService.verifyAccessCode(code);
-
     setState(() {
-      _isLoading = false;
+      _isLoading = true;
     });
 
+    final userData = await _firebaseService.verifyAccessCode(code);
+
     if (userData != null) {
-      if (!mounted) return;
       bool isApproved = userData['isApproved'] ?? false;
 
       if (isApproved) {
         SharedPreferences prefs = await SharedPreferences.getInstance();
-        await prefs.setString('accessCode', code);
+        // Simpan sesuai format DashboardScreen agar berjalan lancar
+        await prefs.setString('accessCode', code); 
+        // Simpan sesuai request kamu
+        await prefs.setBool('isLoggedIn', true);
+        await prefs.setString('userRole', userData['role'] ?? 'Guest');
 
         if (!mounted) return;
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(builder: (context) => const DashboardScreen()),
-        );
+        Navigator.pushReplacementNamed(context, '/dashboard');
       } else {
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(
-            builder: (context) => const VerificationStatusScreen(),
-          ),
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Akun Anda belum disetujui Admin')),
         );
       }
     } else {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Kode Akses tidak valid atau belum terdaftar')),
+      );
+    }
+
+    if (mounted) {
       setState(() {
-        _errorMessage = 'Access Code tidak valid atau belum terdaftar.';
+        _isLoading = false;
       });
     }
   }
@@ -72,7 +68,6 @@ class _RequestAccessScreenState extends State<RequestAccessScreen> {
   @override
   Widget build(BuildContext context) {
     return PremiumScaffold(
-      // Kita tambahkan tombol kembali agar user bisa balik ke Welcome Screen
       leading: IconButton(
         icon: const Icon(Icons.arrow_back_ios_new_rounded, color: Colors.white),
         onPressed: () => Navigator.pop(context),
@@ -83,7 +78,6 @@ class _RequestAccessScreenState extends State<RequestAccessScreen> {
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              // Logo Branding yang Pop-Up
               GlassCard(
                 borderRadius: 100,
                 padding: const EdgeInsets.all(16),
@@ -99,7 +93,6 @@ class _RequestAccessScreenState extends State<RequestAccessScreen> {
                 ),
               ),
               const SizedBox(height: 32),
-
               const Text(
                 'Otentikasi Akses',
                 textAlign: TextAlign.center,
@@ -115,36 +108,21 @@ class _RequestAccessScreenState extends State<RequestAccessScreen> {
                 'Masukkan Access Code khusus Anda untuk melanjutkan',
                 textAlign: TextAlign.center,
                 style: TextStyle(
-                  color: Colors.white.withOpacity(0.5),
+                  color: Colors.white.withValues(alpha: 0.5),
                   fontSize: 14,
                 ),
               ),
               const SizedBox(height: 48),
-
-              // Form dalam GlassCard
               GlassCard(
                 child: Column(
                   children: [
                     GlassTextField(
                       controller: _codeController,
-                      hintText: 'Access Code',
+                      hintText: 'Format: VTK-XXXX',
                       prefixIcon: Icons.lock_outline_rounded,
                       obscureText: true,
                     ),
-                    if (_errorMessage.isNotEmpty) ...[
-                      const SizedBox(height: 16),
-                      Text(
-                        _errorMessage,
-                        style: const TextStyle(
-                          color: Colors.redAccent,
-                          fontSize: 13,
-                        ),
-                        textAlign: TextAlign.center,
-                      ),
-                    ],
                     const SizedBox(height: 24),
-
-                    // Button Login Premium
                     SizedBox(
                       width: double.infinity,
                       child: InkWell(
@@ -156,13 +134,13 @@ class _RequestAccessScreenState extends State<RequestAccessScreen> {
                             gradient: LinearGradient(
                               colors: [
                                 Colors.blueAccent,
-                                Colors.blueAccent.withOpacity(0.6),
+                                Colors.blueAccent.withValues(alpha: 0.6),
                               ],
                             ),
                             borderRadius: BorderRadius.circular(16),
                             boxShadow: [
                               BoxShadow(
-                                color: Colors.blueAccent.withOpacity(0.3),
+                                color: Colors.blueAccent.withValues(alpha: 0.3),
                                 blurRadius: 15,
                                 offset: const Offset(0, 5),
                               ),
@@ -180,7 +158,7 @@ class _RequestAccessScreenState extends State<RequestAccessScreen> {
                                   ),
                                 )
                               : const Text(
-                                  'Verifikasi Akses',
+                                  'MASUK KE VELTRIK',
                                   textAlign: TextAlign.center,
                                   style: TextStyle(
                                     color: Colors.white,
