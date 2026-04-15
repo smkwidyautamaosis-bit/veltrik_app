@@ -5,6 +5,7 @@ import 'screens/welcome_screen.dart';
 import 'screens/request_access_screen.dart';
 import 'screens/role_selection_screen.dart';
 import 'screens/dashboard_screen.dart';
+import 'screens/admin_upload_screen.dart';
 import 'services/supabase_service.dart';
 
 void main() async {
@@ -36,8 +37,8 @@ class VeltrikApp extends StatelessWidget {
         '/welcome': (context) => const WelcomeScreen(),
         '/login': (context) => const RequestAccessScreen(),
         '/role_selection': (context) => const RoleSelectionScreen(),
-        '/dashboard': (context) =>
-            const DashboardScreen(), // RUTE SUDAH TERPASANG
+        '/dashboard': (context) => const DashboardScreen(),
+        '/admin-upload': (context) => const AdminUploadScreen(),
       },
     );
   }

@@ -57,6 +57,8 @@ class _AdminPanelScreenState extends State<AdminPanelScreen> {
         return _buildUserManagement();
       case 4:
         return _buildPdfBank();
+      case 5:
+        return _buildVerseBank();
       default:
         return _buildMainMenu();
     }
@@ -71,15 +73,23 @@ class _AdminPanelScreenState extends State<AdminPanelScreen> {
       children: [
         _menu(Icons.how_to_reg_rounded, "Verifikasi", Colors.orangeAccent, 1),
         _menu(Icons.people_alt_rounded, "User List", Colors.greenAccent, 3),
-        _menu(Icons.upload_file_rounded, "Upload", Colors.blueAccent, 2),
-        _menu(Icons.folder_special_rounded, "Bank PDF", Colors.purpleAccent, 4),
+        _menu(Icons.auto_awesome, "Smart Parser\n(Verse)", Colors.blueAccent, 0, route: '/admin-upload'),
+        _menu(Icons.upload_file_rounded, "Classic PDF\nUpload", Colors.lightBlue, 2),
+        _menu(Icons.folder_special_rounded, "Bank Soal\nVerse", Colors.purpleAccent, 5),
+        _menu(Icons.picture_as_pdf_rounded, "Bank Soal\nPDF", Colors.redAccent, 4),
       ],
     );
   }
 
-  Widget _menu(IconData icon, String label, Color color, int view) {
+  Widget _menu(IconData icon, String label, Color color, int view, {String? route}) {
     return InkWell(
-      onTap: () => setState(() => _currentView = view),
+      onTap: () {
+        if (route != null) {
+          Navigator.pushNamed(context, route);
+        } else {
+          setState(() => _currentView = view);
+        }
+      },
       borderRadius: BorderRadius.circular(24),
       child: GlassCard(
         child: Column(
@@ -89,9 +99,11 @@ class _AdminPanelScreenState extends State<AdminPanelScreen> {
             const SizedBox(height: 12),
             Text(
               label,
+              textAlign: TextAlign.center,
               style: const TextStyle(
                 fontWeight: FontWeight.bold,
                 color: Colors.white,
+                fontSize: 13,
               ),
             ),
           ],
@@ -342,6 +354,56 @@ class _AdminPanelScreenState extends State<AdminPanelScreen> {
                       color: Colors.white24,
                     ),
                     onPressed: () => _fs.deletePdf(docs[index].id),
+                  ),
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Widget _buildVerseBank() {
+    return StreamBuilder<QuerySnapshot>(
+      stream: _fs.getAllSmartMaterialsStream(),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting)
+          return const Center(child: CircularProgressIndicator());
+        final docs = snapshot.data?.docs ?? [];
+        return ListView.builder(
+          padding: const EdgeInsets.all(20),
+          itemCount: docs.length,
+          itemBuilder: (context, index) {
+            var verse = docs[index].data() as Map<String, dynamic>;
+            return Padding(
+              padding: const EdgeInsets.only(bottom: 10),
+              child: GlassCard(
+                padding: const EdgeInsets.all(8),
+                child: ListTile(
+                  leading: const Icon(
+                    Icons.auto_awesome,
+                    color: Colors.purpleAccent,
+                  ),
+                  title: Text(
+                    "${verse['subject'] ?? 'Campuran'} - Soal ${verse['id'] ?? 0}",
+                    style: const TextStyle(color: Colors.white),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  subtitle: Text(
+                    "${verse['role'] ?? '-'} | ${verse['class_group'] ?? '-'}",
+                    style: const TextStyle(
+                      color: Colors.blueAccent,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  trailing: IconButton(
+                    icon: const Icon(
+                      Icons.delete_sweep_rounded,
+                      color: Colors.white24,
+                    ),
+                    onPressed: () => _fs.deleteSmartMaterial(docs[index].id),
                   ),
                 ),
               ),

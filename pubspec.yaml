@@ -16,11 +16,14 @@ dependencies:
   firebase_auth: ^6.3.0
   cloud_firestore: ^6.2.0
   syncfusion_flutter_pdfviewer: ^33.1.47
+  syncfusion_flutter_pdf: ^33.1.47
   url_launcher: ^6.3.1
   shared_preferences: ^2.2.3
   supabase_flutter: ^2.12.2
   file_picker: ^11.0.2
   screen_protector: ^1.5.1
+  image_picker: ^1.2.1
+  cached_network_image: ^3.4.1
 
 dev_dependencies:
   flutter_test:

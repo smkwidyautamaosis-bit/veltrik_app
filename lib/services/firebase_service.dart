@@ -32,17 +32,34 @@ class FirebaseService {
     }
   }
 
-  // --- MANAJEMEN PDF ---
+  // --- MANAJEMEN PDF KLASIK ---
   Stream<QuerySnapshot> getAllPdfsStream() {
     return _firestore
-        .collection('pdfs')
+        .collection('manual_pdfs')
         .orderBy('createdAt', descending: true)
         .snapshots();
   }
 
   Future<bool> deletePdf(String docId) async {
     try {
-      await _firestore.collection('pdfs').doc(docId).delete();
+      await _firestore.collection('manual_pdfs').doc(docId).delete();
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  // --- MANAJEMEN SMART MATERIALS (VERSE) ---
+  Stream<QuerySnapshot> getAllSmartMaterialsStream() {
+    return _firestore
+        .collection('smart_materials')
+        .orderBy('createdAt', descending: true)
+        .snapshots();
+  }
+
+  Future<bool> deleteSmartMaterial(String docId) async {
+    try {
+      await _firestore.collection('smart_materials').doc(docId).delete();
       return true;
     } catch (e) {
       return false;
@@ -72,7 +89,7 @@ class FirebaseService {
   Future<List<Map<String, dynamic>>> getPdfsByRole(String role) async {
     try {
       QuerySnapshot q = await _firestore
-          .collection('pdfs')
+          .collection('manual_pdfs')
           .where('role', isEqualTo: role)
           .get();
       return q.docs.map((doc) => doc.data() as Map<String, dynamic>).toList();
@@ -83,7 +100,7 @@ class FirebaseService {
 
   Future<List<Map<String, dynamic>>> getAllPdfs() async {
     try {
-      QuerySnapshot q = await _firestore.collection('pdfs').get();
+      QuerySnapshot q = await _firestore.collection('manual_pdfs').get();
       return q.docs.map((doc) => doc.data() as Map<String, dynamic>).toList();
     } catch (e) {
       return [];
@@ -128,7 +145,7 @@ class FirebaseService {
 
   Future<bool> addPdfRecord(String title, String role, String url) async {
     try {
-      await _firestore.collection('pdfs').add({
+      await _firestore.collection('manual_pdfs').add({
         'title': title,
         'role': role,
         'url': url,

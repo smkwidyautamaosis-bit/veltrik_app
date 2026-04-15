@@ -6,6 +6,7 @@ import '../widgets/premium_scaffold.dart';
 import '../widgets/glass_card.dart';
 import 'admin_panel_screen.dart';
 import 'pdf_viewer_screen.dart';
+import 'hacker_loading_screen.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
@@ -54,10 +55,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
         setState(() {
           _name = u['name'] ?? 'User';
           _role = u['role'] ?? 'Unknown';
-          // Load PDF hanya untuk siswa (bukan Admin)
-          if (_role.toLowerCase() != 'admin') {
-            _pdfsFuture = _fs.getPdfsByRole(_role);
-          }
         });
       }
     }
@@ -196,70 +193,194 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   Widget _buildPdfGrid() {
-    return FutureBuilder<List<Map<String, dynamic>>>(
-      future: _pdfsFuture,
-      builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting)
-          return const Center(child: CircularProgressIndicator());
-        final pdfs = snapshot.data ?? [];
+    return StreamBuilder<QuerySnapshot>(
+      stream: FirebaseFirestore.instance
+          .collection('smart_materials')
+          .where('role', isEqualTo: _role)
+          .snapshots(),
+      builder: (context, snapshotVerse) {
+        return StreamBuilder<QuerySnapshot>(
+          stream: FirebaseFirestore.instance
+              .collection('manual_pdfs')
+              .where('role', isEqualTo: _role)
+              .snapshots(),
+          builder: (context, snapshotPdf) {
+            if (snapshotVerse.connectionState == ConnectionState.waiting || 
+                snapshotPdf.connectionState == ConnectionState.waiting) {
+              return const Center(child: CircularProgressIndicator(color: Colors.blueAccent));
+            }
 
-        if (pdfs.isEmpty) {
-          return const Center(
-            child: Text(
-              "Belum ada materi untuk kelas Anda.",
-              style: TextStyle(color: Colors.white54),
-            ),
-          );
-        }
+            List<Map<String, dynamic>> verseData = snapshotVerse.hasData 
+                ? snapshotVerse.data!.docs.map((d) => d.data() as Map<String, dynamic>).toList() 
+                : [];
+                
+            List<Map<String, dynamic>> pdfData = snapshotPdf.hasData 
+                ? snapshotPdf.data!.docs.map((d) => d.data() as Map<String, dynamic>).toList() 
+                : [];
 
-        return ListView.separated(
-          padding: const EdgeInsets.symmetric(horizontal: 24),
-          itemCount: pdfs.length,
-          separatorBuilder: (context, index) => const SizedBox(height: 12),
-          itemBuilder: (context, index) {
-            final pdf = pdfs[index];
-            return InkWell(
-              onTap: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (context) => PdfViewerScreen(
-                      title: pdf['title'] ?? 'PDF',
-                      url: pdf['url'] ?? '',
-                    ),
-                  ),
-                );
-              },
-              child: GlassCard(
-                padding: const EdgeInsets.all(16),
-                child: Row(
-                  children: [
-                    const Icon(
-                      Icons.picture_as_pdf_rounded,
-                      color: Colors.redAccent,
-                    ),
-                    const SizedBox(width: 16),
-                    Expanded(
-                      child: Text(
-                        pdf['title'] ?? 'Materi Tanpa Judul',
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ),
-                    const Icon(
-                      Icons.arrow_forward_ios_rounded,
-                      color: Colors.white24,
-                      size: 14,
-                    ),
-                  ],
+            if (verseData.isEmpty && pdfData.isEmpty) {
+              return const Center(
+                child: Text(
+                  "Belum ada materi untuk kelas Anda.",
+                  style: TextStyle(color: Colors.white54),
                 ),
-              ),
+              );
+            }
+
+            // Grouping Verse
+            Map<String, int> subjectCounts = {};
+            for (var data in verseData) {
+               String subject = data['subject'] ?? 'Materi Campuran';
+               subjectCounts[subject] = (subjectCounts[subject] ?? 0) + 1;
+            }
+            List<String> subjects = subjectCounts.keys.toList();
+
+            int totalItems = subjects.length + pdfData.length;
+
+            return ListView.builder(
+              padding: const EdgeInsets.symmetric(horizontal: 24),
+              itemCount: totalItems,
+              itemBuilder: (context, index) {
+                // VERSE CARDS (Teratas)
+                if (index < subjects.length) {
+                  String subject = subjects[index];
+                  int count = subjectCounts[subject] ?? 0;
+                  
+                  IconData folderIcon = Icons.code_rounded;
+                  Color iconColor = Colors.blueAccent;
+                  if (index % 3 == 1) {
+                     folderIcon = Icons.terminal_rounded;
+                     iconColor = Colors.cyanAccent;
+                  } else if (index % 3 == 2) {
+                     folderIcon = Icons.integration_instructions_rounded;
+                     iconColor = Colors.purpleAccent;
+                  }
+
+                  return Padding(
+                    padding: const EdgeInsets.only(bottom: 16.0),
+                    child: _buildItemCard(
+                      title: subject,
+                      subtitle: "$count Unit Sub-Kompetensi",
+                      icon: folderIcon,
+                      iconColor: iconColor,
+                      badgeText: "VERSE",
+                      badgeColor: Colors.blueAccent,
+                      onTap: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(builder: (context) => HackerLoadingScreen(subject: subject)),
+                        );
+                      }
+                    ),
+                  );
+                } 
+                // PDF CARDS (Terbawah)
+                else {
+                  int pIndex = index - subjects.length;
+                  var pdfInfo = pdfData[pIndex];
+                  
+                  return Padding(
+                    padding: const EdgeInsets.only(bottom: 16.0),
+                    child: _buildItemCard(
+                      title: pdfInfo['title'] ?? 'Materi PDF',
+                      subtitle: "Dokumen Statis (${pdfInfo['role']})",
+                      icon: Icons.code_rounded, // Konsistensi instruksi user
+                      iconColor: Colors.purpleAccent,
+                      badgeText: "PDF",
+                      badgeColor: Colors.orangeAccent,
+                      onTap: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) => PdfViewerScreen(
+                              title: pdfInfo['title'] ?? 'Materi PDF',
+                              url: pdfInfo['url'] ?? '',
+                            ),
+                          ),
+                        );
+                      }
+                    ),
+                  );
+                }
+              },
             );
-          },
+          }
         );
       },
+    );
+  }
+
+  Widget _buildItemCard({
+    required String title,
+    required String subtitle,
+    required IconData icon,
+    required Color iconColor,
+    required String badgeText,
+    required Color badgeColor,
+    required VoidCallback onTap,
+  }) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(16),
+      child: GlassCard(
+        padding: const EdgeInsets.all(20),
+        child: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                 color: iconColor.withValues(alpha: 0.1),
+                 borderRadius: BorderRadius.circular(12),
+                 border: Border.all(color: iconColor.withValues(alpha: 0.3)),
+              ),
+              child: Icon(icon, color: iconColor.withValues(alpha: 0.8), size: 30),
+            ),
+            const SizedBox(width: 16),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 16,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    subtitle,
+                    style: TextStyle(
+                       color: Colors.white.withValues(alpha: 0.5),
+                       fontSize: 12,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              decoration: BoxDecoration(
+                 color: badgeColor.withValues(alpha: 0.2),
+                 borderRadius: BorderRadius.circular(8),
+                 border: Border.all(color: badgeColor.withValues(alpha: 0.5)),
+              ),
+              child: Text(
+                badgeText,
+                style: TextStyle(
+                  color: badgeColor,
+                  fontSize: 10,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Icon(Icons.arrow_forward_ios_rounded, color: Colors.white.withValues(alpha: 0.2), size: 16,),
+          ],
+        ),
+      ),
     );
   }
 

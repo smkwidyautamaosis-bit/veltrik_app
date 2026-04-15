@@ -30,4 +30,24 @@ class SupabaseService {
       return null;
     }
   }
+
+  Future<String?> uploadImage(File file, String fileName) async {
+    try {
+      final String filePath =
+          'IMG_${DateTime.now().millisecondsSinceEpoch}_${fileName.replaceAll(' ', '_')}';
+
+      await Supabase.instance.client.storage
+          .from('pdfs')
+          .upload(filePath, file);
+
+      final String publicUrl = Supabase.instance.client.storage
+          .from('pdfs')
+          .getPublicUrl(filePath);
+
+      return publicUrl;
+    } catch (e) {
+      print('Supabase image upload error: $e');
+      return null;
+    }
+  }
 }
